@@ -46,65 +46,60 @@ def run(*args):
     return subprocess.run([sys.executable, str(CONVERT), *map(str, args)], capture_output=True, text=True)
 
 
+NEW_ID = uuid.UUID("abcdefab-cdef-abcd-efab-cdefabcdefab")
+
+
+def unfinished(data):
+    compressor = brotli.Compressor()
+    return compressor.process(data) + compressor.flush()
+
+
 class ConvertTest(unittest.TestCase):
-    def test_only_the_demo_flag_changes(self):
+    def test_only_the_id_and_the_demo_flag_change(self):
         original = save()
-        header, converted = convert.convert(original)
+        header, converted = convert.convert(original, NEW_ID)
         self.assertEqual((header.character, header.gamemode, header.total_level, header.gp, header.slayer_coins), ("Garu Garu", "Standard", 1234, 5_000_000, 4_512))
         self.assertFalse(header.is_demo)
         self.assertEqual(len(converted), len(original))
-        self.assertEqual([index for index in range(len(original)) if original[index] != converted[index]], [header.demo_flag_at])
-        self.assertEqual(converted[header.demo_flag_at], 1)
-        self.assertTrue(convert.Header(converted).is_demo)
+        changed = [index for index in range(len(original)) if original[index] != converted[index]]
+        self.assertTrue(set(changed) <= set(range(4, 20)) | {header.demo_flag_at})
+        after = convert.Header(converted)
+        self.assertTrue(after.is_demo)
+        self.assertEqual(after.uuid, NEW_ID, 'a new id, so the copy sits beside the original instead of replacing it')
+        self.assertEqual((after.character, after.total_level), (header.character, header.total_level))
 
     def test_long_names_use_multi_byte_lengths(self):
-        header, converted = convert.convert(save(name="G" * 300))
+        header, converted = convert.convert(save(name="G" * 300), NEW_ID)
         self.assertEqual(header.character, "G" * 300)
         self.assertTrue(convert.Header(converted).is_demo)
 
-    def test_reads_files_and_save_strings(self):
-        packed = brotli.compress(save())
-        self.assertEqual(convert.load(packed), (save(), False))
-        self.assertEqual(convert.load(base64.b64encode(packed) + b"\n"), (save(), True))
+    def test_reads_files_and_save_strings_including_the_unfinished_streams_the_game_writes(self):
+        for packed in (brotli.compress(save()), unfinished(save())):
+            self.assertEqual(convert.load(packed), (save(), False))
+            self.assertEqual(convert.load(base64.b64encode(packed) + b"\n"), (save(), True))
         with self.assertRaises(convert.SaveError):
             convert.load(b"not a save")
 
     def test_saves_from_before_the_demo_flag_are_refused(self):
         with self.assertRaisesRegex(convert.SaveError, "before Alpha 0.11.0"):
-            convert.convert(save(version=23))
+            convert.convert(save(version=23), NEW_ID)
 
     def test_a_cut_off_header_is_reported(self):
         with self.assertRaisesRegex(convert.SaveError, "ends partway"):
-            convert.convert(save()[:30])
+            convert.convert(save()[:30], NEW_ID)
 
-    def test_command_line_writes_a_save_file_and_a_save_string(self):
+    def test_command_line_writes_a_save_string_to_the_out_folder(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "playtest.txt"
-            source.write_text(base64.b64encode(brotli.compress(save())).decode())
-            result = run(source)
+            source.write_text(base64.b64encode(unfinished(save())).decode())
+            out = Path(folder) / "out"
+            out.mkdir()
+            result = run(source, "--out", out)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Garu Garu (Standard), total level 1234", result.stdout)
-            written = brotli.decompress((Path(folder) / "playtest-demo.sav").read_bytes())
+            written = brotli.decompress(base64.b64decode((out / "playtest-demo.txt").read_text()))
             self.assertTrue(convert.Header(written).is_demo)
-            self.assertEqual(brotli.decompress(base64.b64decode((Path(folder) / "playtest-demo.txt").read_text())), written)
-
-    def test_install_puts_the_save_in_the_demo_folder_and_respects_its_limits(self):
-        with tempfile.TemporaryDirectory() as folder:
-            convert.DEMO_SAVES = Path(folder) / "saves"
-            packed = Path(folder) / "converted.sav"
-            packed.write_bytes(b"save")
-            header = convert.Header(save())
-            target = convert.install(packed, header, force=False)
-            self.assertEqual(target.name, "save_12345678-1234-5678-1234-567812345678.sav")
-            with self.assertRaisesRegex(convert.SaveError, "already exists"):
-                convert.install(packed, header, force=False)
-            self.assertEqual(convert.install(packed, header, force=True), target)
-            for index in range(4):
-                (convert.DEMO_SAVES / f"save_{index}.sav").write_bytes(b"other")
-            other = convert.Header(save())
-            other.uuid = uuid.uuid4()
-            with self.assertRaisesRegex(convert.SaveError, "limit"):
-                convert.install(packed, other, force=False)
+            self.assertEqual(sorted(path.name for path in out.iterdir()), ["playtest-demo.txt"])
 
 
 if __name__ == "__main__":
