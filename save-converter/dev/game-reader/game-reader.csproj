@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GameData>$(HOME)/Library/Application Support/Steam/steamapps/common/Melvor Idle 2 Demo/Melvor2.app/Contents/Resources/data_GamesByMalcs.Melvor2_macos_arm64</GameData>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="GamesByMalcs.Melvor2"><HintPath>$(GameData)/GamesByMalcs.Melvor2.dll</HintPath></Reference>
+    <Reference Include="GodotSharp"><HintPath>$(GameData)/GodotSharp.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

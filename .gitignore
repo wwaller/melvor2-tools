@@ -1,0 +1,6 @@
+__pycache__/
+.DS_Store
+bin/
+obj/
+*-demo.sav
+*-demo.txt
